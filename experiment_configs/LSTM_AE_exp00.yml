@@ -1,0 +1,10 @@
+epochs: 300
+lr: 0.001
+clip_value: 1.0
+h_dims: [512, 512, 256, 128]
+input_dim: 768
+encoding_dim: 64
+out_activ: 'tanh'
+batch_size: 32
+
+save_path: './experiments/LSTM_AE_00/'
