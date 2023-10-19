@@ -5,7 +5,7 @@ import os
 def get_device():
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def simple_train_step(dataloader, model, device, criterion, optimizer, clip_value=1.0, sparsity_penalty_weight=None):
+def simple_train_step(dataloader, model, device, criterion, optimizer, clip_value=1.0):
     model.train()
 
     losses = []
@@ -18,10 +18,7 @@ def simple_train_step(dataloader, model, device, criterion, optimizer, clip_valu
         # Forward pass
         y = model(x)
 
-        loss = criterion(y, x)
-        if sparsity_penalty_weight:
-            l1_penalty = torch.abs(model.z).sum()
-            loss = (l1_penalty * sparsity_penalty_weight) + loss
+        loss = criterion(y, x, model.z)
 
         # Backward pass
         loss.backward()
@@ -39,7 +36,7 @@ def simple_train_step(dataloader, model, device, criterion, optimizer, clip_valu
 
     return epoch_loss, model, optimizer
 
-def simple_eval_step(dataloader, model, criterion, sparsity_penalty_weight, device):
+def simple_eval_step(dataloader, model, criterion, device):
     model.eval()
     pbar = tqdm.tqdm(dataloader)
     losses = []
@@ -48,11 +45,8 @@ def simple_eval_step(dataloader, model, criterion, sparsity_penalty_weight, devi
         x = x.to(device)
         with torch.no_grad():
             y = model(x)
-            loss = criterion(y, x)
+            loss = criterion(y, x, model.z)
             avg_loss = loss / x.shape[0]
-            if sparsity_penalty_weight:
-                l1_penalty = torch.abs(model.z).sum()
-                loss = (l1_penalty * sparsity_penalty_weight) + avg_loss
             losses.append(avg_loss)
         pbar.set_description(f'val loss: {avg_loss.item():.3f}')
 
@@ -72,17 +66,16 @@ def train_loop(
     epochs,
     save_path,
     eval_every=1,
-    clip_value=1.0,
-    sparsity_penalty_weight=None
+    clip_value=1.0
 ):
     os.makedirs(os.path.join(save_path, 'weights'), exist_ok=True)
     best_loss = 1e+15
     for epoch in range(epochs):
         train_loss, model, optimizer = simple_train_step(
-            train_loader, model, device, criterion, optimizer, clip_value, sparsity_penalty_weight)
+            train_loader, model, device, criterion, optimizer, clip_value)
 
         if (epoch+1)%eval_every == 0:
-            val_loss = simple_eval_step(val_loader, model, criterion, sparsity_penalty_weight, device)
+            val_loss = simple_eval_step(val_loader, model, criterion, device)
 
         if scheduler:
             scheduler.step(val_loss)
