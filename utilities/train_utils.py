@@ -2,6 +2,8 @@ import torch
 import tqdm
 import os
 
+import matplotlib.pyplot as plt
+
 def get_device():
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -70,12 +72,16 @@ def train_loop(
 ):
     os.makedirs(os.path.join(save_path, 'weights'), exist_ok=True)
     best_loss = 1e+15
+    train_losses = []
+    val_losses = []
     for epoch in range(epochs):
         train_loss, model, optimizer = simple_train_step(
             train_loader, model, device, criterion, optimizer, clip_value)
+        train_losses.append(train_loss.detach().numpy())
 
         if (epoch+1)%eval_every == 0:
             val_loss = simple_eval_step(val_loader, model, criterion, device)
+            val_losses.append(val_loss.cpu().numpy())
 
         if scheduler:
             scheduler.step(val_loss)
@@ -88,3 +94,14 @@ def train_loop(
         print(f'Epoch {epoch}\tTrain Loss: {train_loss:.3f}  Val Loss: {val_loss:.3f}\n')
         
     torch.save(model, os.path.join(save_path, 'weights', 'last.pt'))
+
+    fig, ax = plt.subplots()
+    ax.plot(range(epochs), train_losses, label='Training Loss')
+    ax.plot(range(0, epochs, eval_every), val_losses, label='Validation Loss')
+    ax.set(xlabel='Epoch', ylabel='Loss')
+    ax.legend()
+
+    fig.savefig(os.path.join(save_path, 'loss.jpg'))
+
+    return fig
+
