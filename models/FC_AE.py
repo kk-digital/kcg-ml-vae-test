@@ -7,8 +7,6 @@ class LossFC(nn.Module):
         self.lambda_sparsity = lambda_sparsity
         self.lambda_l1 = lambda_l1
 
-        self.sparsity_dist = torch.distributions.Bernoulli(torch.tensor(0.1))
-
     def _sparsity_loss(self, latent_activations):
         """Calculates the sparsity loss between the latent activations and the target distribution.
 
@@ -18,9 +16,9 @@ class LossFC(nn.Module):
         Returns:
             A tensor containing the sparsity loss.
         """
-
+        sparsity_dist = torch.distributions.Bernoulli(torch.tensor(0.1))
         kl_divergence = nn.KLDivLoss(reduction='batchmean')
-        loss = kl_divergence(latent_activations, self.sparsity_dist.probs)
+        loss = kl_divergence(latent_activations, sparsity_dist.probs)
 
         return loss
 
@@ -28,7 +26,7 @@ class LossFC(nn.Module):
         assert y.shape == (y.shape[0], 77, 768)
         assert y_hat.shape == (y.shape[0], 77, 768)
 
-        loss = nn.MSELoss(reduction='mean')(y, y_hat)
+        loss = nn.MSELoss(reduction='sum')(y, y_hat)
         losses = {'mse': loss}
         
         if self.lambda_sparsity:
