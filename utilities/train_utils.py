@@ -23,10 +23,10 @@ class LossTracker:
         """
         for key, value in loss_dict.items():
             if key in self.losses:
-                self.losses[key] += value / batch_size
+                self.losses[key] += (value / batch_size)
                 self.counts[key] += 1
             else:
-                self.losses[key] = value / batch_size
+                self.losses[key] = (value / batch_size)
                 self.counts[key] = 1
 
     def average(self):

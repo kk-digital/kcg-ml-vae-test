@@ -28,12 +28,12 @@ class LossFC(nn.Module):
         assert y.shape == (y.shape[0], 77, 768)
         assert y_hat.shape == (y.shape[0], 77, 768)
 
-        loss = nn.MSELoss(reduction='sum')(y, y_hat)
+        loss = nn.MSELoss(reduction='mean')(y, y_hat)
         losses = {'mse': loss}
         
         if self.lambda_sparsity:
             # l1_penalty = torch.abs(z).mean()
-            sparsity_loss = self.lambda_sparsity * self._sparsity_loss(z)
+            sparsity_loss = self.lambda_sparsity * self._sparsity_loss(torch.nn.Sigmoid()(z))
             loss += sparsity_loss
             losses ['sparsity'] = sparsity_loss
 

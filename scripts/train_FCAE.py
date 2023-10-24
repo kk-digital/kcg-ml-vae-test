@@ -22,9 +22,9 @@ configs = {
     'decoder_dropout_prob': 0.0,
     'save_path': './experiments/fc_exp10',
     'weight_decay': 0.1,
-    'lambda_sparsity': 0.01,
+    'lambda_sparsity': 0.1,
     'lambda_l1': 0.01,
-    'noise': 0.1,
+    'noise': 0.0,
     'codebook_size': 0
 }
 
