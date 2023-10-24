@@ -19,8 +19,8 @@ class LossFC(nn.Module):
             A tensor containing the sparsity loss.
         """
 
-        kl_divergence = nn.KLDivLoss(reduction='mean')
-        loss = kl_divergence(latent_activations, self.sparsity_dist)
+        kl_divergence = nn.KLDivLoss(reduction='batchmean')
+        loss = kl_divergence(latent_activations, self.sparsity_dist.probs)
 
         return loss
 
@@ -28,23 +28,29 @@ class LossFC(nn.Module):
         assert y.shape == (y.shape[0], 77, 768)
         assert y_hat.shape == (y.shape[0], 77, 768)
 
-        reconstruction_loss = nn.MSELoss(reduction='sum')(y, y_hat)
+        loss = nn.MSELoss(reduction='sum')(y, y_hat)
+        losses = {'mse': loss}
         
-        # l1_penalty = torch.abs(z).mean()
-        sparsity_loss = self.lambda_sparsity * self._sparsity_loss(z)
+        if self.lambda_sparsity:
+            # l1_penalty = torch.abs(z).mean()
+            sparsity_loss = self.lambda_sparsity * self._sparsity_loss(z)
+            loss += sparsity_loss
+            losses ['sparsity'] = sparsity_loss
 
-        l1_loss = self.lambda_l1 * torch.nn.L1Loss()(y_hat, y)
+        if self.lambda_l1:
+            l1_loss = self.lambda_l1 * torch.nn.L1Loss()(y_hat, y)
+            loss += l1_loss
+            losses['l1'] = l1_loss
 
-        total_loss = reconstruction_loss + sparsity_loss + l1_loss
-
-        return total_loss
+        return loss, losses
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim, latent_dim, hidden_units, dropout_prob, pooling='max'):
+    def __init__(self, input_dim, latent_dim, hidden_units, dropout_prob, noise=0.0, pooling='max'):
         super(Encoder, self).__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.hidden_units = hidden_units
+        self.noise = noise
 
         self.layer_norm = nn.LayerNorm(self.input_dim)
         
@@ -67,6 +73,9 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         assert x.shape == (x.shape[0], 77, 768)
+
+        if self.noise:
+            x = x + torch.randn_like(x) * self.noise
 
         # reshape for fc
         x = x.view(-1, 768)
@@ -127,12 +136,29 @@ class AutoEncoder(nn.Module):
         encoder_dropout_prob,
         decoder_dropout_prob,
         pooling='max',
-        out_act='tanh'
+        out_act='tanh',
+        noise=0.0,
+        codebook_size=0
     ):
         super(AutoEncoder, self).__init__()
 
-        self.encoder = Encoder(input_dim, latent_dim, encoder_hidden_units, encoder_dropout_prob, pooling)
+        self.encoder = Encoder(input_dim, latent_dim, encoder_hidden_units, encoder_dropout_prob, noise, pooling)
         self.decoder = Decoder(input_dim, latent_dim, decoder_hidden_units, decoder_dropout_prob, out_act)
+
+        if codebook_size:
+            self.codebook = nn.Embedding(codebook_size, latent_dim)
+
+    def _quantize(self, latent_representation):
+        # Calculate the distance between the latent representation and each codebook vector
+        distances = torch.cdist(latent_representation, self.codebook.weight, p=2)
+
+        # Find the codebook vector that is closest to the latent representation
+        nearest_codebook_indices = torch.argmin(distances, dim=1)
+
+        # Return the quantized latent representation
+        quantized_latent_representation = self.codebook(nearest_codebook_indices)
+
+        return quantized_latent_representation
 
     def forward(self, x):
         self.z = self.encoder(x)

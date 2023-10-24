@@ -9,11 +9,51 @@ import matplotlib.pyplot as plt
 def get_device():
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+class LossTracker:
+    def __init__(self):
+        self.losses = {}  # Initialize an empty dictionary to store the losses
+        self.counts = {}  # Initialize a dictionary to keep track of the counts for each loss key
+
+    def update(self, loss_dict, batch_size):
+        """
+        Update the loss tracker with a dictionary of losses.
+
+        Args:
+            loss_dict (dict): A dictionary containing loss values with keys.
+        """
+        for key, value in loss_dict.items():
+            if key in self.losses:
+                self.losses[key] += value / batch_size
+                self.counts[key] += 1
+            else:
+                self.losses[key] = value / batch_size
+                self.counts[key] = 1
+
+    def average(self):
+        """
+        Calculate the average of tracked losses.
+
+        Returns:
+            dict: A dictionary containing the average losses for each key.
+        """
+        averaged_losses = {}
+        for key in self.losses:
+            averaged_losses[key] = self.losses[key] / self.counts[key]
+        return averaged_losses
+
+    def reset(self):
+        """
+        Reset the loss tracker, clearing all tracked losses and counts.
+        """
+        self.losses = {}
+        self.counts = {}
+
 def simple_train_step(dataloader, model, device, criterion, optimizer, clip_value=1.0):
     model.train()
 
     losses = []
     pbar = tqdm.tqdm(dataloader)
+    loss_tracker = LossTracker()
     for data in pbar:
         x = data[0]
         x = x.to(device)
@@ -22,7 +62,7 @@ def simple_train_step(dataloader, model, device, criterion, optimizer, clip_valu
         # Forward pass
         y = model(x)
 
-        loss = criterion(y, x, model.z)
+        loss, loss_dict = criterion(y, x, model.z)
 
         # Backward pass
         loss.backward()
@@ -33,31 +73,37 @@ def simple_train_step(dataloader, model, device, criterion, optimizer, clip_valu
         avg_loss = loss / x.shape[0]
         optimizer.step()
         losses.append(avg_loss)
+        loss_tracker.update(loss_dict, x.shape[0])
         pbar.set_description(f'train loss: {avg_loss.item():.3f}')
 
+    all_loss = loss_tracker.average()
+    loss_tracker.reset()
     losses = torch.stack(losses, 0)
     epoch_loss = torch.mean(losses).cpu()
 
-    return epoch_loss, model, optimizer
+    return epoch_loss, all_loss, model, optimizer
 
 def simple_eval_step(dataloader, model, criterion, device):
     model.eval()
     pbar = tqdm.tqdm(dataloader)
     losses = []
+    loss_tracker = LossTracker()
     for data in pbar:
         x = data[0]
         x = x.to(device)
         with torch.no_grad():
             y = model(x)
-            loss = criterion(y, x, model.z)
+            loss, loss_dict = criterion(y, x, model.z)
             avg_loss = loss / x.shape[0]
             losses.append(avg_loss)
         pbar.set_description(f'val loss: {avg_loss.item():.3f}')
+        loss_tracker.update(loss_dict, x.shape[0])
 
+    all_loss = loss_tracker.average()
     losses = torch.stack(losses, 0)
     final_loss = torch.mean(losses).cpu()
     
-    return final_loss
+    return final_loss, all_loss
 
 def train_loop(
     train_loader,
@@ -81,12 +127,12 @@ def train_loop(
     for epoch in range(epochs):
         current_lr = optimizer.param_groups[0]['lr']
         learning_rates.append(current_lr)
-        train_loss, model, optimizer = simple_train_step(
+        train_loss, train_all_loss, model, optimizer = simple_train_step(
             train_loader, model, device, criterion, optimizer, clip_value)
         train_losses.append(train_loss.detach().numpy())
 
         if (epoch+1)%eval_every == 0:
-            val_loss = simple_eval_step(val_loader, model, criterion, device)
+            val_loss, val_all_loss = simple_eval_step(val_loader, model, criterion, device)
             val_losses.append(val_loss.cpu().numpy())
 
         if scheduler:
@@ -97,7 +143,14 @@ def train_loop(
             torch.save(model, os.path.join(save_path, 'weights', 'best.pt'))
             best_loss = val_loss
 
-        print(f'Epoch {epoch}\tLR: {current_lr:.4f}\tTrain Loss: {train_loss:.3f}  Val Loss: {val_loss:.3f}\n')
+        print(f'Epoch {epoch}\tLR: {current_lr:.6f}')
+        train_loss_str = 'Train Losses: '
+        for k, v in train_all_loss.items():
+            train_loss_str += f'{k}: {v:.3f}\t'
+        val_loss_str = 'Val Losses: '
+        for k, v in val_all_loss.items():
+            val_loss_str += f'{k}: {v:.3f}\t'
+        print(f'{train_loss_str}\n{val_loss_str}\n')
         if (epoch + 1) % 10 == 0:
             training_time = time.time()
             print(f'Training time: {(training_time-start_time):.2f} seconds')

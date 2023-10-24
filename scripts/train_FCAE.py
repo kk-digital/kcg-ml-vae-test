@@ -22,8 +22,10 @@ configs = {
     'decoder_dropout_prob': 0.0,
     'save_path': './experiments/fc_exp10',
     'weight_decay': 0.1,
-    'lambda_sparsity': 0.0,
-    'lambda_l1': 0.001
+    'lambda_sparsity': 0.01,
+    'lambda_l1': 0.01,
+    'noise': 0.1,
+    'codebook_size': 0
 }
 
 os.makedirs(configs['save_path'], exist_ok=True)
@@ -46,7 +48,9 @@ model = AutoEncoder(
     encoder_hidden_units=configs['encoder_hidden_units'],
     decoder_hidden_units=configs['decoder_hidden_units'],
     encoder_dropout_prob=configs['encoder_dropout_prob'],
-    decoder_dropout_prob=configs['decoder_dropout_prob']
+    decoder_dropout_prob=configs['decoder_dropout_prob'],
+    noise=configs['noise'],
+    codebook_size=configs['codebook_size']
 )
 # optimizer = torch.optim.SGD(model.parameters(), lr=configs['learning_rate'], momentum=0.9, weight_decay=configs['weight_decay'])
 optimizer = torch.optim.AdamW(model.parameters(), lr=configs['learning_rate'])

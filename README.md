@@ -1,15 +1,12 @@
 # kcg-ml-vae-test
 
 ## Training
-1. Create / modify training config file in `experiment_configs`.
-1. Update config file path in `LSTM_AE.ipynb` and run the code for training.
+1. Make sure dataset is in `data/`.
+1. Go to `scripts/train_FCAE.py` and update hyperparameters.  
+1. Run `python scripts/train_FCAE.py`.
 
-## Results
-| Model                            	| Dataset Preprocessing          	| MSE (sum over 77*768) 	|
-|----------------------------------	|--------------------------------	|-----------------------	|
-| VAE_training_2023-10-18_23-42-39 	| Standard Normalization [-1, 1] 	| 30669.62              	|
-| VAE_training_2023-10-19_08-53-19 	| MinMax Scaling [0, 1]          	| 1137.69               	|
-
-
-## Issue
-- 20231017 Loss decrease very slow at 45000. 
+Executing the training script will produce the following in `experiments/<save_path>`:
+1. `weights/` contain the best (based on validation) and last epoch.
+1. `configs.yaml` records the hyperparameters of the experiment.
+1. `training.log` records the losses, this is updated in real time during training.
+1. `loss.jpg` will be generated at the end of training, a plot of train and validation losses.
