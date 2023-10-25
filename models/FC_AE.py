@@ -7,22 +7,13 @@ class LossFC(nn.Module):
         self.lambda_sparsity = lambda_sparsity
         self.lambda_l1 = lambda_l1
 
-    def _sparsity_loss(self, latent_activations):
-        """Calculates the sparsity loss between the latent activations and the target distribution.
+    def _sparsity_loss(self, p_hat, p=0.1):
+        p_hat = torch.mean(p_hat, axis=0)
+        loss = p * torch.log(p / p_hat) + (1 - p) * torch.log((1 - p) / (1 - p_hat))
 
-        Args:
-            latent_activations: A tensor containing the activations of the latent layer.
+        return torch.sum(loss)
 
-        Returns:
-            A tensor containing the sparsity loss.
-        """
-        sparsity_dist = torch.distributions.Bernoulli(torch.tensor(0.1))
-        kl_divergence = nn.KLDivLoss(reduction='batchmean')
-        loss = kl_divergence(latent_activations, sparsity_dist.probs)
-
-        return loss
-
-    def forward(self, y, y_hat, z):
+    def forward(self, y, y_hat, z, model=None):
         assert y.shape == (y.shape[0], 77, 768)
         assert y_hat.shape == (y.shape[0], 77, 768)
 
@@ -31,24 +22,34 @@ class LossFC(nn.Module):
         
         if self.lambda_sparsity:
             # l1_penalty = torch.abs(z).mean()
-            sparsity_loss = self.lambda_sparsity * self._sparsity_loss(torch.nn.Sigmoid()(z))
+            sparsity_loss = self.lambda_sparsity * self._sparsity_loss(z)
             loss += sparsity_loss
-            losses ['sparsity'] = sparsity_loss
+            losses['sparsity'] = sparsity_loss
 
         if self.lambda_l1:
-            l1_loss = self.lambda_l1 * torch.nn.L1Loss()(y_hat, y)
-            loss += l1_loss
-            losses['l1'] = l1_loss
+            enc_l1_reg = torch.tensor(0.0).to(y.device)
+            for param in model.encoder.parameters():
+                enc_l1_reg += torch.norm(param, 1)
+
+            dec_l1_reg = torch.tensor(0.0).to(y.device)
+            for param in model.decoder.parameters():
+                dec_l1_reg += torch.norm(param, 1)
+
+            l1_reg_loss = self.lambda_l1 * (enc_l1_reg + dec_l1_reg)
+
+            loss += l1_reg_loss
+            losses['l1'] = l1_reg_loss
 
         return loss, losses
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim, latent_dim, hidden_units, dropout_prob, noise=0.0, pooling='max'):
+    def __init__(self, input_dim, latent_dim, hidden_units, dropout_prob, noise=0.0, sparsity=False, pooling='max'):
         super(Encoder, self).__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.hidden_units = hidden_units
         self.noise = noise
+        self.sparsity = sparsity
 
         self.layer_norm = nn.LayerNorm(self.input_dim)
         
@@ -63,11 +64,18 @@ class Encoder(nn.Module):
             encoder_layers.append(nn.Dropout(dropout_prob))
         self.encoder_layers = nn.Sequential(*encoder_layers)
 
-        self.fc_latent = nn.Linear(hidden_units[-1], self.latent_dim)
-        if pooling == 'max':
-            self.pooling = nn.MaxPool1d(kernel_size=77, stride=1)
-        elif pooling == 'avg':
-            self.pooling = nn.AvgPool1d(kernel_size=77, stride=1)
+        reduction_layers = [
+            nn.Conv1d(
+                in_channels=hidden_units[-1],
+                out_channels=32,
+                kernel_size=5,
+                padding='same',
+                padding_mode='circular'
+            ),
+            nn.Dropout(dropout_prob)
+        ]
+        self.reduction_layers = nn.Sequential(*reduction_layers)
+        self.fc_latent = nn.Linear(32 * 77, self.latent_dim)
 
     def forward(self, x):
         assert x.shape == (x.shape[0], 77, 768)
@@ -81,8 +89,11 @@ class Encoder(nn.Module):
 
         # reshape back to batch_size * 77 x hidden size
         x = x.view(-1, 77, self.hidden_units[-1])
-        x = self.pooling(x.permute(0, 2, 1)).squeeze(-1)
+        x = self.reduction_layers(x.permute(0, 2, 1))
+        x = x.view(-1, 77 * 32)
         x = self.fc_latent(x)
+        if self.sparsity:
+            x = nn.Sigmoid()(x)
 
         return x
     
@@ -136,11 +147,12 @@ class AutoEncoder(nn.Module):
         pooling='max',
         out_act='tanh',
         noise=0.0,
+        sparsity=False,
         codebook_size=0
     ):
         super(AutoEncoder, self).__init__()
 
-        self.encoder = Encoder(input_dim, latent_dim, encoder_hidden_units, encoder_dropout_prob, noise, pooling)
+        self.encoder = Encoder(input_dim, latent_dim, encoder_hidden_units, encoder_dropout_prob, noise, sparsity, pooling)
         self.decoder = Decoder(input_dim, latent_dim, decoder_hidden_units, decoder_dropout_prob, out_act)
 
         if codebook_size:

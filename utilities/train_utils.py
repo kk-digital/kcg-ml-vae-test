@@ -62,7 +62,7 @@ def simple_train_step(dataloader, model, device, criterion, optimizer, clip_valu
         # Forward pass
         y = model(x)
 
-        loss, loss_dict = criterion(y, x, model.z)
+        loss, loss_dict = criterion(y, x, model.z, model)
 
         # Backward pass
         loss.backward()
@@ -93,7 +93,7 @@ def simple_eval_step(dataloader, model, criterion, device):
         x = x.to(device)
         with torch.no_grad():
             y = model(x)
-            loss, loss_dict = criterion(y, x, model.z)
+            loss, loss_dict = criterion(y, x, model.z, model)
             avg_loss = loss / x.shape[0]
             losses.append(avg_loss)
         pbar.set_description(f'val loss: {avg_loss.item():.3f}')
