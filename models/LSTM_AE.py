@@ -2,86 +2,79 @@ import torch
 import torch.nn as nn
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim, out_dim, h_dims, h_activ, out_activ):
+    def __init__(self, input_dim, latent_dim, h_dim, n_layers, dropout_prob, noise):
         super(Encoder, self).__init__()
-
-        layer_dims = [input_dim] + h_dims + [out_dim]
-        self.num_layers = len(layer_dims) - 1
-        self.layers = nn.ModuleList()
-        for index in range(self.num_layers):
-            layer = nn.LSTM(
-                input_size=layer_dims[index],
-                hidden_size=layer_dims[index + 1],
-                num_layers=1,
-                batch_first=True,
-            )
-            self.layers.append(layer)
-
-        self.h_activ, self.out_activ = h_activ, out_activ
+        self.noise = noise
+        
+        self.lstm = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=h_dim,
+            num_layers=n_layers,
+            bidirectional=True,
+            batch_first=True,
+            dropout=dropout_prob
+        )
+        self.fc_latent = nn.Linear(h_dim, latent_dim)
 
     def forward(self, x):
-        for index, layer in enumerate(self.layers):
-            x, (h_n, c_n) = layer(x)
+        if self.noise:
+            x = x + torch.randn_like(x) * self.noise
+        output, (hidden, cell) = self.lstm(x)
+        last_output = hidden[-1, :, :]
+        z = self.fc_latent(last_output)
 
-            if self.h_activ and index < self.num_layers - 1:
-                x = self.h_activ(x)
-            elif self.out_activ and index == self.num_layers - 1:
-                return self.out_activ(h_n).squeeze()
-
-        return h_n.squeeze()
+        return z
 
 
 class Decoder(nn.Module):
-    def __init__(self, input_dim, out_dim, h_dims, h_activ):
+    def __init__(self, output_dim, latent_dim, h_dim, out_activ, n_layers, dropout_prob):
         super(Decoder, self).__init__()
-
-        layer_dims = [input_dim] + h_dims + [h_dims[-1]]
-        self.num_layers = len(layer_dims) - 1
-        self.out_dim = out_dim
-        self.layers = nn.ModuleList()
-        for index in range(self.num_layers):
-            layer = nn.LSTM(
-                input_size=layer_dims[index],
-                hidden_size=layer_dims[index + 1],
-                num_layers=1,
-                batch_first=True,
-            )
-            self.layers.append(layer)
-
-        self.h_activ = h_activ
-        self.output_layer = nn.Linear(layer_dims[-1], out_dim)
+        self.output_dim = output_dim
+        self.h_dim = h_dim
+        self.out_activ = out_activ
+        
+        self.lstm = nn.LSTM(
+            input_size=latent_dim,
+            hidden_size=h_dim,
+            num_layers=n_layers,
+            batch_first=True,
+            dropout=dropout_prob
+        )
+        self.fc_out = nn.Linear(h_dim, output_dim)
 
     def forward(self, x, seq_len):
         x = x.repeat(seq_len, 1)
-        for index, layer in enumerate(self.layers):
-            x, (h_n, c_n) = layer(x)
-
-            if self.h_activ and index < self.num_layers - 1:
-                x = self.h_activ(x)
-
-        x = self.output_layer(x)
-        x = x.view(-1, seq_len, self.out_dim)
+        x, (hidden, cell) = self.lstm(x)
+        
+        x = self.fc_out(x)
+        x = x.view(-1, seq_len, self.output_dim)
+        if self.out_activ:
+            x = self.out_activ(x)
 
         return x
 
 
-class LSTM_AE(nn.Module):
+class LSTMAutoEncoder(nn.Module):
     def __init__(
         self,
         input_dim,
-        encoding_dim,
-        h_dims=[],
+        latent_dim,
+        h_dim,
+        n_layers,
         h_activ=nn.Sigmoid(),
         out_activ=nn.Tanh(),
+        encoder_dropout_prob=0.0,
+        decoder_dropout_prob=0.0,
+        noise=0.01
     ):
-        super(LSTM_AE, self).__init__()
+        super(LSTMAutoEncoder, self).__init__()
 
-        self.encoder = Encoder(input_dim, encoding_dim, h_dims, h_activ, out_activ)
-        self.decoder = Decoder(encoding_dim, input_dim, h_dims[::-1], h_activ)
+        self.encoder = Encoder(input_dim, latent_dim, h_dim, n_layers, encoder_dropout_prob, noise)
+        self.decoder = Decoder(input_dim, latent_dim, h_dim, out_activ, n_layers, decoder_dropout_prob)
 
     def forward(self, x):
         seq_len = x.shape[1]
-        x = self.encoder(x)
-        x = self.decoder(x, seq_len)
+        self.z = self.encoder(x)
+        x = self.decoder(self.z, seq_len)
 
         return x

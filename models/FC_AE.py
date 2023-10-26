@@ -1,46 +1,33 @@
 import torch.nn as nn
+import torch.nn.functional as F
 import torch
 
-class LossFC(nn.Module):
-    def __init__(self, lambda_sparsity=0.0, lambda_l1=0.0):
-        super(LossFC, self).__init__()
-        self.lambda_sparsity = lambda_sparsity
-        self.lambda_l1 = lambda_l1
-
-    def _sparsity_loss(self, p_hat, p=0.1):
-        p_hat = torch.mean(p_hat, axis=0)
-        loss = p * torch.log(p / p_hat) + (1 - p) * torch.log((1 - p) / (1 - p_hat))
-
-        return torch.sum(loss)
-
-    def forward(self, y, y_hat, z, model=None):
-        assert y.shape == (y.shape[0], 77, 768)
-        assert y_hat.shape == (y.shape[0], 77, 768)
-
-        loss = nn.MSELoss(reduction='sum')(y, y_hat)
-        losses = {'mse': loss}
+class SelfAttentionPooling(nn.Module):
+    """
+    Implementation of SelfAttentionPooling 
+    Original Paper: Self-Attention Encoding and Pooling for Speaker Recognition
+    https://arxiv.org/pdf/2008.01077v1.pdf
+    """
+    def __init__(self, input_dim):
+        super(SelfAttentionPooling, self).__init__()
+        self.W = nn.Linear(input_dim, 1)
         
-        if self.lambda_sparsity:
-            # l1_penalty = torch.abs(z).mean()
-            sparsity_loss = self.lambda_sparsity * self._sparsity_loss(z)
-            loss += sparsity_loss
-            losses['sparsity'] = sparsity_loss
+    def forward(self, batch_rep):
+        """
+        input:
+            batch_rep : size (N, T, H), N: batch size, T: sequence length, H: Hidden dimension
+        
+        attention_weight:
+            att_w : size (N, T, 1)
+        
+        return:
+            utter_rep: size (N, H)
+        """
+        softmax = nn.functional.softmax
+        att_w = softmax(self.W(batch_rep).squeeze(-1)).unsqueeze(-1)
+        utter_rep = torch.sum(batch_rep * att_w, dim=1)
 
-        if self.lambda_l1:
-            enc_l1_reg = torch.tensor(0.0).to(y.device)
-            for param in model.encoder.parameters():
-                enc_l1_reg += torch.norm(param, 1)
-
-            dec_l1_reg = torch.tensor(0.0).to(y.device)
-            for param in model.decoder.parameters():
-                dec_l1_reg += torch.norm(param, 1)
-
-            l1_reg_loss = self.lambda_l1 * (enc_l1_reg + dec_l1_reg)
-
-            loss += l1_reg_loss
-            losses['l1'] = l1_reg_loss
-
-        return loss, losses
+        return utter_rep
 
 class Encoder(nn.Module):
     def __init__(self, input_dim, latent_dim, hidden_units, dropout_prob, noise=0.0, sparsity=False, pooling='max'):
@@ -75,7 +62,8 @@ class Encoder(nn.Module):
             nn.Dropout(dropout_prob)
         ]
         self.reduction_layers = nn.Sequential(*reduction_layers)
-        self.fc_latent = nn.Linear(32 * 77, self.latent_dim)
+        self.attention_pooling = SelfAttentionPooling(hidden_units[-1])
+        self.fc_latent = nn.Linear(hidden_units[-1], self.latent_dim)
 
     def forward(self, x):
         assert x.shape == (x.shape[0], 77, 768)
@@ -89,8 +77,10 @@ class Encoder(nn.Module):
 
         # reshape back to batch_size * 77 x hidden size
         x = x.view(-1, 77, self.hidden_units[-1])
-        x = self.reduction_layers(x.permute(0, 2, 1))
-        x = x.view(-1, 77 * 32)
+        # x = self.reduction_layers(x.permute(0, 2, 1))
+        x = self.attention_pooling(x)
+        print(x.shape)
+        # x = x.view(-1, 77 * 32)
         x = self.fc_latent(x)
         if self.sparsity:
             x = nn.Sigmoid()(x)
