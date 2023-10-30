@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class AELoss(nn.Module):
-    def __init__(self, lambda_sparsity=0.0, lambda_l1=0.0):
+    def __init__(self, lambda_sparsity=0.0, lambda_l1=0.0, vq=None):
         super(AELoss, self).__init__()
         self.lambda_sparsity = lambda_sparsity
         self.lambda_l1 = lambda_l1
+        self.vq = vq
 
     def _sparsity_loss(self, p_hat, p=0.1):
         p_hat = torch.mean(p_hat, axis=0)
@@ -17,7 +19,8 @@ class AELoss(nn.Module):
         assert y.shape == (y.shape[0], 77, 768)
         assert y_hat.shape == (y.shape[0], 77, 768)
 
-        loss = nn.MSELoss(reduction='sum')(y, y_hat)
+        loss = F.mse_loss(y_hat, y, reduction='sum') / y.shape[0]
+        # loss = loss / torch.var(y)
         losses = {'mse': loss}
         
         if self.lambda_sparsity:
@@ -39,5 +42,12 @@ class AELoss(nn.Module):
 
             loss += l1_reg_loss
             losses['l1'] = l1_reg_loss
+
+        if self.vq:
+            vq_loss = model.vq_loss
+
+            loss += vq_loss
+            losses['vq'] = vq_loss
+            losses['perplexity'] = model.perplexity
 
         return loss, losses

@@ -3,7 +3,7 @@ sys.path.append('..')
 
 from utilities.utils import read_embedding_data
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, normalize
 from torch.utils.data import TensorDataset
 
 import numpy as np
@@ -33,7 +33,7 @@ def get_dataset(data_path: str, scaler: str=None) -> (TensorDataset, TensorDatas
 
     # read the POSTIIVE embeddings and store it in a numpy array
     X = []
-    for path in tqdm.tqdm(embedding_files):
+    for path in tqdm.tqdm(embedding_files[:1000]):
         pos_emb, neg_emb = read_embedding_data(path)
         X.append(pos_emb)
     X = np.concatenate(X, axis=0)
@@ -42,18 +42,26 @@ def get_dataset(data_path: str, scaler: str=None) -> (TensorDataset, TensorDatas
 
     # scale data. MinMaxScaler fit / transform methods only support 2D
     # thus the need to reshape
+    Xtr = Xtr.reshape(-1, 768)
+    Xvl = Xvl.reshape(-1, 768)
     if scaler == 'minmax':
-        scl = MinMaxScaler()
-        Xtr = Xtr.reshape(-1, 768)
-        Xvl = Xvl.reshape(-1, 768)
-
+        scl = MinMaxScaler((-1, 1))
         Xtr = scl.fit_transform(Xtr)
         Xvl = scl.transform(Xvl)
 
-        # reshape it back
-        Xtr = Xtr.reshape(-1, 77, 768)
-        Xvl = Xvl.reshape(-1, 77, 768)
+    elif scaler == 'l2':
+        Xtr, l2_norm = normalize(Xtr, norm='l2', axis=1, return_norm=True)
+        Xvl, l2_norm = normalize(Xvl, norm='l2', axis=1, return_norm=True)
 
+    elif scaler == 'standard':
+        xmean = Xtr.mean()
+        xstd = Xtr.std()
+        Xtr = (Xtr - xmean) / xstd
+        Xvl = (Xvl - xmean) / xstd
+
+    # reshape it back
+    Xtr = Xtr.reshape(-1, 77, 768)
+    Xvl = Xvl.reshape(-1, 77, 768)
 
     # convert to pytorch dataset format
     train_data = torch.tensor(Xtr, dtype=torch.float32)
