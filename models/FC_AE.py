@@ -65,6 +65,11 @@ class Encoder(nn.Module):
         self.attention_pooling = SelfAttentionPooling(hidden_units[-1])
         self.fc_latent = nn.Linear(hidden_units[-1], self.latent_dim)
 
+        if pooling == 'max':
+            self.pooling = nn.MaxPool1d(kernel_size=77, stride=1)
+        elif pooling == 'avg':
+            self.pooling = nn.AvgPool1d(kernel_size=77, stride=1)
+
     def forward(self, x):
         assert x.shape == (x.shape[0], 77, 768)
 
@@ -76,10 +81,9 @@ class Encoder(nn.Module):
         x = self.encoder_layers(x)
 
         # reshape back to batch_size * 77 x hidden size
-        x = x.view(-1, 77, self.hidden_units[-1])
+        x = x.view(-1, self.hidden_units[-1], 77)
         # x = self.reduction_layers(x.permute(0, 2, 1))
-        x = self.attention_pooling(x)
-        print(x.shape)
+        x = self.pooling(x).squeeze(-1)
         # x = x.view(-1, 77 * 32)
         x = self.fc_latent(x)
         if self.sparsity:

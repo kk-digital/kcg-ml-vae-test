@@ -5,7 +5,7 @@ import torch
 import os
 import yaml
 
-from utilities.utils import get_dataset
+from utilities.dataloader_embeddings import get_dataset
 from utilities.train_utils import train_loop, get_device
 from models.FC_AE import AutoEncoder
 from models.Loss import AELoss
@@ -15,16 +15,16 @@ configs = {
     'learning_rate': 1e-3,
     'pooling': 'avg',
     'batch_size': 128,
-    'epoch': 2000,
+    'epoch': 50,
     'latent_dim': 768,
     'encoder_hidden_units': [2048] * 5,
     'decoder_hidden_units': [2048] * 5,
     'encoder_dropout_prob': 0.5,
     'decoder_dropout_prob': 0.0,
-    'save_path': './experiments/fc_exp10',
+    'save_path': './experiments/fc_exp12',
     'weight_decay': 0.1,
-    'lambda_sparsity': 0.1,
-    'lambda_l1': 0.01,
+    'lambda_sparsity': 0.,
+    'lambda_l1': 0.0,
     'noise': 0.0,
     'codebook_size': 0
 }
@@ -37,7 +37,7 @@ with open(os.path.join(configs['save_path'], 'configs.yml'), 'w') as f:
 
 device = get_device()
 
-train_dataset, val_dataset = get_dataset()
+train_dataset, val_dataset = get_dataset('../data/', 'standard')
 train_loader = DataLoader(train_dataset, batch_size=configs['batch_size'], shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=configs['batch_size'], shuffle=False)
 
@@ -45,7 +45,7 @@ model = AutoEncoder(
     input_dim=768,
     latent_dim=configs['latent_dim'],
     pooling=configs['pooling'],
-    out_act='sigmoid',
+    out_act=None,
     encoder_hidden_units=configs['encoder_hidden_units'],
     decoder_hidden_units=configs['decoder_hidden_units'],
     encoder_dropout_prob=configs['encoder_dropout_prob'],
@@ -53,8 +53,8 @@ model = AutoEncoder(
     noise=configs['noise'],
     codebook_size=configs['codebook_size']
 )
-# optimizer = torch.optim.SGD(model.parameters(), lr=configs['learning_rate'], momentum=0.9, weight_decay=configs['weight_decay'])
-optimizer = torch.optim.AdamW(model.parameters(), lr=configs['learning_rate'])
+
+optimizer = torch.optim.Adam(model.parameters(), lr=configs['learning_rate'])
 # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, threshold=0.001)
 scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(train_loader), epochs=configs['epoch'])
 model = model.to(device)
@@ -73,7 +73,7 @@ fig, mean_train_loss, mean_val_loss, best_loss = train_loop(
     optimizer=optimizer,
     epochs=configs['epoch'],
     save_path=configs['save_path'],
-    scheduler=scheduler
+    scheduler=None
 )
 
 print('\nTraining Completed')
